@@ -1,0 +1,41 @@
+plugin.sbtplugin.SbtPlugin.name=Simple Build Tool
+plugin.sbtplugin.SbtPlugin.author=Marcelo Vanzin
+plugin.sbtplugin.SbtPlugin.version=0.1.0
+plugin.sbtplugin.SbtPlugin.activate=defer
+plugin.sbtplugin.SbtPlugin.usePluginHome=true
+plugin.sbtplugin.SbtPlugin.description=Integration with the Scala Simple Build Tool.
+plugin.sbtplugin.SbtPlugin.depend.0=jedit 05.00.99.00
+plugin.sbtplugin.SbtPlugin.depend.1=jdk 1.7
+
+plugin.sbtplugin.SbtPlugin.depend.2=plugin CommonControlsPlugin 1.5
+plugin.sbtplugin.SbtPlugin.depend.3=plugin errorlist.ErrorListPlugin 2.1
+plugin.sbtplugin.SbtPlugin.depend.4=plugin console.ConsolePlugin 1.6
+plugin.sbtplugin.SbtPlugin.depend.5=plugin projectviewer.ProjectPlugin 3.5.3
+
+sbtconsole.title=SBT Shell
+sbtconsole.label=Open SBT Console
+
+plugin.sbtplugin.SbtPlugin.menu=\
+  sbtconsole
+
+sbtplugin.shell.entry=Command:
+
+plugin.sbtplugin.SbtPlugin.option-pane=sbt.global
+options.sbt.global.label=Simple Build Tool
+options.sbt.global.code = new sbtplugin.SbtGlobalOptions()
+options.sbt.command=SBT Command:
+options.sbt.max_scrollback=Max number of lines in scrollback buffer:
+options.sbt.max_scrollback.error=Invalid value for max lines.
+
+options.sbt.config.label=Simple Build Tool
+options.sbt.config.sbt.enabled=Enable SBT
+options.sbt.config.sbt.monitor_cmd=Monitor Command
+options.sbt.config.sbt.monitor_cmd.tooltip=Command to run when source files change.
+
+options.sbt.config.env.separator=SBT Environment
+options.sbt.config.env.name=Name:
+options.sbt.config.env.value=Value:
+options.sbt.config.error.no_env_name=No name provided.
+
+sbt.error.child=Error starting sbt: {0}
+

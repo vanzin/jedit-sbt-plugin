@@ -1,0 +1,4 @@
+build/*
+.hg*
+.project
+.classpath

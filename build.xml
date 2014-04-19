@@ -1,0 +1,30 @@
+<project name="SbtPlugin" default="build" basedir=".">
+
+  <property file="build.properties" />
+  <property file="../build.properties" />
+  <property name="build.support" value="../build-support" />
+
+  <property name="plugin.dependencies"
+      value="CommonControls,Console,ErrorList,ProjectViewer" />
+  <property name="jedit.plugins.dir" value="${install.dir}" />
+  <property name="compiler.source" value="1.7" />
+  <property name="compiler.target" value="1.7" />
+
+  <import file="${build.support}/plugin-build.xml" />
+
+  <selector id="compileFiles">
+    <filename name="src/main/java/**/*.java" />
+  </selector>
+
+  <path id="class.path">
+    <pathelement location="${jedit.plugins.dir}/CommonControls.jar" />
+    <pathelement location="${jedit.plugins.dir}/Console.jar" />
+    <pathelement location="${jedit.plugins.dir}/ErrorList.jar" />
+    <pathelement location="${jedit.plugins.dir}/ProjectViewer.jar" />
+  </path>
+  <path id="project.class.path">
+    <path refid="class.path" />
+  </path>
+
+</project>
+
