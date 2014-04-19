@@ -147,9 +147,15 @@ public class SbtConsole extends JPanel {
     } catch (InterruptedException ie) {
       // Nothing to do.
     }
-    console.setText("");
+    SwingUtilities.invokeLater(new Runnable() {
+      @Override
+      public void run() {
+        console.setText("");
+        bufferLineCount = 0;
+      }
+    });
+
     this.sbt = null;
-    this.handler.disable();
     this.handler = null;
   }
 
@@ -180,14 +186,12 @@ public class SbtConsole extends JPanel {
 
 		private boolean waiting;
     private boolean monitoring;
-    private boolean enabled;
 
 		SbtHandler(String monitor) {
 		  this.monitor = (monitor != null && !monitor.isEmpty()) ?
 		      monitor : null;
 		  this.error = new StringBuilder();
 		  this.output = new StringBuilder();
-		  this.enabled = true;
 		}
 
     @Override
@@ -219,7 +223,8 @@ public class SbtConsole extends JPanel {
 			    runCommand(monitor);
 			    monitoring = true;
 			  }
-			  SwingUtilities.invokeLater(new Appender(target.toString()));
+
+			  append(target.toString());
 			  target.setLength(0);
 			}
 			return true;
@@ -255,29 +260,17 @@ public class SbtConsole extends JPanel {
       }
     }
 
-    void disable() {
-      this.enabled = false;
-    }
-
 		private void process(String line) {
-		  if (enabled) {
-        SwingUtilities.invokeLater(new Appender(line));
-      }
+		  append(line);
 		}
 
-  }
-
-  private class Appender implements Runnable {
-
-    private final String line;
-
-    Appender(String line) {
-      this.line = line;
-    }
-
-    @Override
-    public void run() {
-      appendToConsole(line);
+		private void append(final String line) {
+      SwingUtilities.invokeLater(new Runnable() {
+        @Override
+        public void run() {
+          appendToConsole(line);
+        }
+      });
     }
 
   }
