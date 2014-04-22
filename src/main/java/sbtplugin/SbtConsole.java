@@ -54,6 +54,7 @@ public class SbtConsole extends JPanel {
 
   private static final String HISTORY_KEY =
       SbtShell.class.getName() + ".commands";
+  private static final String SBT_DISABLED = "sbt.disabled.msg";
 
   private static final Pattern ERROR =
       Pattern.compile("\\s*\\[error\\]\\s+(.+?):([0-9]+):\\s+(.*)[\r\n]+");
@@ -106,10 +107,7 @@ public class SbtConsole extends JPanel {
     propertiesChanged(null);
     EditBus.addToBus(this);
 
-    VPTProject active = ProjectViewer.getActiveProject(view);
-    if (active != null && isEnabled(active)) {
-      startSbt(active);
-    }
+    startSbt(ProjectViewer.getActiveProject(view));
   }
 
   @EBHandler
@@ -138,23 +136,26 @@ public class SbtConsole extends JPanel {
       return;
     }
 
-    boolean enabled = false;
-    if (update.getType() == ViewerUpdate.Type.PROJECT_LOADED) {
-      enabled = isEnabled((VPTProject) update.getNode());
+    stopSbt();
+
+    if (update.getType() != ViewerUpdate.Type.PROJECT_LOADED) {
+      return;
     }
 
-    if (enabled) {
-      if (sbt == null) {
-        startSbt((VPTProject) update.getNode());
-      }
-    } else {
-      if (sbt != null) {
-        stopSbt();
-      }
-    }
+    startSbt((VPTProject) update.getNode());
   }
 
   private void startSbt(VPTProject project) {
+    if (project == null || !isEnabled(project)) {
+      try {
+        document.insertString(0, jEdit.getProperty(SBT_DISABLED),
+            new SimpleAttributeSet());
+      } catch (BadLocationException ble) {
+        ble.printStackTrace();
+      }
+      return;
+    }
+
     ProcessExecutor pe = new ProcessExecutor(
         SbtGlobalOptions.getSbtCommand(),
         "-Dsbt.log.noformat=true");
@@ -180,23 +181,20 @@ public class SbtConsole extends JPanel {
   }
 
   private void stopSbt() {
-    handler.runCommand("exit");
-    try {
-      sbt.waitFor();
-    } catch (InterruptedException ie) {
-      // Nothing to do.
-    }
-    SwingUtilities.invokeLater(new Runnable() {
-      @Override
-      public void run() {
-        try {
-          document.remove(0, document.getLength());
-        } catch (BadLocationException ble) {
-          ble.printStackTrace();
-        }
-        bufferLineCount = 0;
+    if (sbt != null) {
+      handler.runCommand("exit");
+      try {
+        sbt.waitFor();
+      } catch (InterruptedException ie) {
+        // Nothing to do.
       }
-    });
+    }
+    try {
+      document.remove(0, document.getLength());
+    } catch (BadLocationException ble) {
+      ble.printStackTrace();
+    }
+    bufferLineCount = 0;
 
     this.sbt = null;
     this.handler = null;

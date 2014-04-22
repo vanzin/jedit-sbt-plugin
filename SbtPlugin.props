@@ -50,6 +50,7 @@ options.sbt.config.env.name=Name:
 options.sbt.config.env.value=Value:
 options.sbt.config.error.no_env_name=No name provided.
 
+sbt.disabled.msg=SBT is not enabled for the current project.
 sbt.error.child=Error starting sbt: {0}
 sbt.error_source_name=SBT
 
