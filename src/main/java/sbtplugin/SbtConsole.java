@@ -19,12 +19,19 @@ import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
-import javax.swing.JTextArea;
+import javax.swing.JTextPane;
 import javax.swing.SwingUtilities;
+import javax.swing.text.BadLocationException;
+import javax.swing.text.DefaultStyledDocument;
+import javax.swing.text.Segment;
+import javax.swing.text.SimpleAttributeSet;
+import javax.swing.text.StyleConstants;
 
 import org.gjt.sp.jedit.jEdit;
 import org.gjt.sp.jedit.EditBus;
@@ -36,6 +43,9 @@ import org.gjt.sp.util.Log;
 
 import common.io.ProcessExecutor;
 import common.io.ProcessExecutor.Visitor;
+import errorlist.DefaultErrorSource;
+import errorlist.DefaultErrorSource.DefaultError;
+import errorlist.ErrorSource;
 import projectviewer.ProjectViewer;
 import projectviewer.event.ViewerUpdate;
 import projectviewer.vpt.VPTProject;
@@ -45,8 +55,23 @@ public class SbtConsole extends JPanel {
   private static final String HISTORY_KEY =
       SbtShell.class.getName() + ".commands";
 
+  private static final Pattern ERROR =
+      Pattern.compile("\\s*\\[error\\]\\s+(.+?):([0-9]+):\\s+(.*)[\r\n]+");
+  private static final Pattern WARNING =
+      Pattern.compile("\\s*\\[warn\\]\\s+(.+?):([0-9]+):\\s+(.*)[\r\n]+");
+  private static final Pattern EXTRA =
+      Pattern.compile("\\s*\\[(?:error|warn)\\]\\s{2}(.+)[\r\n]+");
+  private static final Pattern GENERIC_ERROR =
+      Pattern.compile("\\s*\\[error\\].*[\r\n]+");
+  private static final Pattern GENERIC_WARNING =
+      Pattern.compile("\\s*\\[warn\\].*[\r\n]+");
+
+  private static final Pattern WAITING =
+      Pattern.compile("[0-9]+\\. Waiting for source changes\\.\\.\\..*[\r\n]+");
+
   private final HistoryTextField entry;
-  private final JTextArea console;
+  private final JTextPane console;
+  private final DefaultStyledDocument document;
   private final View view;
 
   private Color plainColor;
@@ -74,7 +99,8 @@ public class SbtConsole extends JPanel {
     entryPanel.add(BorderLayout.CENTER, entry);
     add(BorderLayout.NORTH, entryPanel);
 
-    console = new JTextArea();
+    document = new DefaultStyledDocument();
+    console = new JTextPane(document);
     console.setEditable(false);
     add(BorderLayout.CENTER, new JScrollPane(console));
     propertiesChanged(null);
@@ -163,7 +189,11 @@ public class SbtConsole extends JPanel {
     SwingUtilities.invokeLater(new Runnable() {
       @Override
       public void run() {
-        console.setText("");
+        try {
+          document.remove(0, document.getLength());
+        } catch (BadLocationException ble) {
+          ble.printStackTrace();
+        }
         bufferLineCount = 0;
       }
     });
@@ -176,72 +206,107 @@ public class SbtConsole extends JPanel {
     return SbtOptionsPane.getBoolean(p, SbtOptionsPane.SBT_ENABLED);
   }
 
-  private void appendToConsole(String line) {
-    if (bufferLineCount == maxScrollback) {
-      String curr = console.getText();
-      for (int i = 0; i < curr.length(); i++) {
-        if (curr.charAt(i) == '\n') {
-          console.setText(curr.substring(i + 1));
-          break;
+  private void appendToConsole(String line, Color color) {
+    try {
+      if (bufferLineCount == maxScrollback) {
+        Segment s = new Segment();
+
+        int lastStart = 0;
+        int newline = -1;
+        while (true) {
+          document.getText(lastStart, Math.min(1024, document.getLength()), s);
+          for (int i = 0; i < s.count; i++) {
+            if (s.array[s.offset + i] == '\n') {
+              newline = i;
+              break;
+            }
+          }
+          if (newline != -1) {
+            break;
+          }
+
+          lastStart += 1024;
+          if (lastStart > document.getLength()) {
+            // OOps.
+            break;
+          }
         }
+        if (newline != -1) {
+          document.remove(0, newline);
+        }
+      } else {
+        bufferLineCount++;
       }
-    } else {
-      bufferLineCount++;
+
+      SimpleAttributeSet attrs = new SimpleAttributeSet();
+      if (color != null) {
+        attrs.addAttribute(StyleConstants.Foreground, color);
+      }
+      document.insertString(console.getText().length(), line, attrs);
+    } catch (BadLocationException ble) {
+      ble.printStackTrace();
     }
-    console.append(line);
   }
 
   private class SbtHandler implements Visitor {
 
     private final String monitor;
-		private final StringBuilder error;
-		private final StringBuilder output;
+    private final StringBuilder errorStream;
+    private final StringBuilder output;
 
-		private boolean waiting;
+    private boolean waiting;
     private boolean monitoring;
+    private boolean inWait;
+    private Color currMatch;
 
-		SbtHandler(String monitor) {
-		  this.monitor = (monitor != null && !monitor.isEmpty()) ?
-		      monitor : null;
-		  this.error = new StringBuilder();
-		  this.output = new StringBuilder();
-		}
+    private final DefaultErrorSource errorSource;
+    private boolean registered;
+    private DefaultError error;
+
+    SbtHandler(String monitor) {
+      this.monitor = (monitor != null && !monitor.isEmpty()) ?
+          monitor : null;
+      this.errorStream = new StringBuilder();
+      this.output = new StringBuilder();
+      this.errorSource = new DefaultErrorSource(
+          jEdit.getProperty("sbt.error_source_name"), view);
+    }
 
     @Override
-		public boolean process(byte[] buf, int len, boolean isError) {
-			StringBuilder target = isError ? error : output;
+    public boolean process(byte[] buf, int len, boolean isError) {
+      StringBuilder target = isError ? errorStream : output;
 
-			if (buf != null) {
-				for (int i = 0; i < len; i++) {
-					target.append((char)buf[i]);
-				}
-			} else if (target.length() > 0) {
-				target.append("\n");
-			}
+      if (buf != null) {
+        for (int i = 0; i < len; i++) {
+          target.append((char)buf[i]);
+        }
+      } else if (target.length() > 0) {
+        target.append("\n");
+      }
 
-			int idx;
-			while ((idx = target.indexOf("\n")) >= 0) {
-				String line = target.substring(0, idx + 1);
-				target.delete(0, idx + 1);
-				process(line);
-			}
+      int idx;
+      while ((idx = target.indexOf("\n")) >= 0) {
+        String line = target.substring(0, idx + 1);
+        target.delete(0, idx + 1);
+        process(line);
+      }
 
-			if (target.toString().equals("> ")) {
-			  if (waiting) {
-			    synchronized (this) {
-			      waiting = false;
-			      notifyAll();
-			    }
-			  } else if (monitor != null) {
-			    runCommand(monitor);
-			    monitoring = true;
-			  }
+      if (target.toString().equals("> ")) {
+        if (waiting) {
+          synchronized (this) {
+            waiting = false;
+            notifyAll();
+          }
+        } else if (monitor != null) {
+          runCommand(monitor);
+          monitoring = true;
+        }
 
-			  append(target.toString());
-			  target.setLength(0);
-			}
-			return true;
-		}
+        append(target.toString(), null);
+        target.setLength(0);
+      }
+      return true;
+    }
 
     void runCommand(String command) {
       if (monitoring) {
@@ -254,7 +319,7 @@ public class SbtConsole extends JPanel {
             while (waiting) {
               wait();
             }
-			      monitoring = false;
+            monitoring = false;
           }
         } catch (IOException ioe) {
           ioe.printStackTrace();
@@ -273,15 +338,71 @@ public class SbtConsole extends JPanel {
       }
     }
 
-		private void process(String line) {
-		  append(line);
-		}
+    private void process(String line) {
+      if (isMatch(line, ERROR, ErrorSource.ERROR)) {
+        currMatch = errorColor;
+      } else if (isMatch(line, WARNING, ErrorSource.WARNING)) {
+        currMatch = warningColor;
+      } else if (currMatch != null) {
+        Matcher m = EXTRA.matcher(line);
+        if (m.matches()) {
+          error.addExtraMessage(m.group(1));
+        } else {
+          currMatch = null;
+        }
+      }
 
-		private void append(final String line) {
+      Color highlight = currMatch;
+      if (currMatch == null) {
+        if (isMatch(line, GENERIC_ERROR)) {
+          highlight = errorColor;
+        } else if (isMatch(line, GENERIC_WARNING)) {
+          highlight = warningColor;
+        }
+      }
+
+      if (inWait) {
+        registered = false;
+        errorSource.clear();
+        inWait = false;
+        ErrorSource.unregisterErrorSource(errorSource);
+      } else {
+        Matcher m = WAITING.matcher(line);
+        if (m.matches()) {
+          inWait = true;
+        }
+      }
+
+      append(line, highlight);
+    }
+
+    private boolean isMatch(String line, Pattern regex) {
+      return regex.matcher(line).matches();
+    }
+
+    private boolean isMatch(String line, Pattern regex, int type) {
+      Matcher m = regex.matcher(line);
+      if (m.matches()) {
+        String path = m.group(1);
+        int lineno = Integer.parseInt(m.group(2));
+        error = new DefaultError(errorSource, type, path, lineno - 1,
+            0, 0, m.group(3));
+        errorSource.addError(error);
+
+        if (!registered) {
+          registered = true;
+          ErrorSource.registerErrorSource(errorSource);
+        }
+        return true;
+      }
+      return false;
+    }
+
+    private void append(final String line, final Color color) {
       SwingUtilities.invokeLater(new Runnable() {
         @Override
         public void run() {
-          appendToConsole(line);
+          appendToConsole(line, color);
         }
       });
     }
@@ -298,12 +419,10 @@ public class SbtConsole extends JPanel {
       }
       handler.runCommand(command);
       entry.setText("");
-		}
+    }
 
   }
 
-  // TODO: start child process, monitor / parse output.
-  // TODO: handle user commands.
   // TODO: remove from edit bus.
 
 }

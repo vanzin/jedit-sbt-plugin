@@ -51,4 +51,5 @@ options.sbt.config.env.value=Value:
 options.sbt.config.error.no_env_name=No name provided.
 
 sbt.error.child=Error starting sbt: {0}
+sbt.error_source_name=SBT
 
