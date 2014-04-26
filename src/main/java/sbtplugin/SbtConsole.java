@@ -19,6 +19,10 @@ import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import javax.swing.JLabel;
@@ -53,7 +57,7 @@ import projectviewer.vpt.VPTProject;
 public class SbtConsole extends JPanel {
 
   private static final String HISTORY_KEY =
-      SbtShell.class.getName() + ".commands";
+      SbtConsole.class.getName() + ".commands";
   private static final String SBT_DISABLED = "sbt.disabled.msg";
 
   private static final Pattern ERROR =
@@ -85,6 +89,7 @@ public class SbtConsole extends JPanel {
   private OutputStream stdin;
   private int bufferLineCount;
   private int maxScrollback;
+  private ExecutorService streams;
 
   public SbtConsole(View view) {
     super(new BorderLayout());
@@ -145,7 +150,7 @@ public class SbtConsole extends JPanel {
     startSbt((VPTProject) update.getNode());
   }
 
-  private void startSbt(VPTProject project) {
+  private void startSbt(final VPTProject project) {
     if (project == null || !isEnabled(project)) {
       try {
         document.insertString(0, jEdit.getProperty(SBT_DISABLED),
@@ -156,9 +161,23 @@ public class SbtConsole extends JPanel {
       return;
     }
 
+    this.streams = Executors.newFixedThreadPool(2,
+      new ThreadFactory() {
+        private final AtomicInteger id = new AtomicInteger();
+
+        @Override
+        public Thread newThread(Runnable r) {
+          Thread t = new Thread(r);
+          t.setName(String.format("SBT-%s-%d", project.getName(),
+              id.incrementAndGet()));
+          return t;
+        }
+      });
+
     ProcessExecutor pe = new ProcessExecutor(
         SbtGlobalOptions.getSbtCommand(),
         "-Dsbt.log.noformat=true");
+    pe.setExecutor(streams);
     pe.addCurrentEnv();
     for (SbtOptionsPane.EnvVar v : SbtOptionsPane.getEnv(project)) {
       pe.addEnv(v.name, v.value);
@@ -175,6 +194,8 @@ public class SbtConsole extends JPanel {
       JOptionPane.showMessageDialog(view,
           jEdit.getProperty("sbt.error.child",
                             new Object[] { ioe.getMessage() }));
+      streams.shutdownNow();
+      streams = null;
       return;
     }
     this.sbt = pe;
@@ -188,6 +209,7 @@ public class SbtConsole extends JPanel {
       } catch (InterruptedException ie) {
         // Nothing to do.
       }
+      streams.shutdown();
     }
     try {
       document.remove(0, document.getLength());
@@ -198,6 +220,7 @@ public class SbtConsole extends JPanel {
 
     this.sbt = null;
     this.handler = null;
+    this.streams = null;
   }
 
   private boolean isEnabled(VPTProject p) {
@@ -230,7 +253,7 @@ public class SbtConsole extends JPanel {
           }
         }
         if (newline != -1) {
-          document.remove(0, newline);
+          document.remove(0, newline + 1);
         }
       } else {
         bufferLineCount++;
