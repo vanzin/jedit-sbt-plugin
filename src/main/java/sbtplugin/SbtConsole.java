@@ -15,6 +15,9 @@ package sbtplugin;
 
 import java.awt.BorderLayout;
 import java.awt.Color;
+import java.awt.ComponentOrientation;
+import java.awt.Dimension;
+import java.awt.FlowLayout;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.io.IOException;
@@ -25,11 +28,13 @@ import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import javax.swing.ImageIcon;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JTextPane;
+import javax.swing.JToggleButton;
 import javax.swing.SwingUtilities;
 import javax.swing.text.BadLocationException;
 import javax.swing.text.DefaultStyledDocument;
@@ -74,10 +79,13 @@ public class SbtConsole extends JPanel {
   private static final Pattern WAITING =
       Pattern.compile("[0-9]+\\. Waiting for source changes\\.\\.\\..*[\r\n]+");
 
-  private final HistoryTextField entry;
   private final JTextPane console;
   private final DefaultStyledDocument document;
   private final View view;
+
+  private final JPanel entryPanel;
+  private final HistoryTextField entry;
+  private final JToggleButton monitor;
 
   private Color plainColor;
   private Color infoColor;
@@ -95,7 +103,8 @@ public class SbtConsole extends JPanel {
     super(new BorderLayout());
     this.view = view;
 
-    JPanel entryPanel = new JPanel(new BorderLayout());
+    entryPanel = new JPanel(new BorderLayout());
+    entryPanel.setEnabled(false);
     entryPanel.add(BorderLayout.WEST,
         new JLabel(jEdit.getProperty("sbtplugin.shell.entry")));
 
@@ -103,6 +112,29 @@ public class SbtConsole extends JPanel {
     entry.setEnterAddsToHistory();
     entry.addActionListener(new CommandRunner());
     entryPanel.add(BorderLayout.CENTER, entry);
+
+    JPanel buttons = new JPanel(new FlowLayout());
+    buttons.setComponentOrientation(ComponentOrientation.LEFT_TO_RIGHT);
+
+    monitor = new JToggleButton();
+    monitor.setIcon(new ImageIcon(
+        getClass().getResource("/watch.png")));
+    monitor.setSelected(true);
+    monitor.setToolTipText(
+        jEdit.getProperty("sbtplugin.shell.monitor.tooltip"));
+    monitor.setPreferredSize(new Dimension(24, 24));
+    monitor.addActionListener(new ActionListener() {
+      @Override
+      public void actionPerformed(ActionEvent ae) {
+        if (handler != null) {
+          handler.toggleMonitoring();
+        }
+      }
+    });
+
+    buttons.add(monitor);
+
+    entryPanel.add(BorderLayout.EAST, buttons);
     add(BorderLayout.NORTH, entryPanel);
 
     document = new DefaultStyledDocument();
@@ -199,6 +231,8 @@ public class SbtConsole extends JPanel {
       return;
     }
     this.sbt = pe;
+    entryPanel.setEnabled(true);
+    monitor.setSelected(true);
   }
 
   private void stopSbt() {
@@ -221,6 +255,7 @@ public class SbtConsole extends JPanel {
     this.sbt = null;
     this.handler = null;
     this.streams = null;
+    entryPanel.setEnabled(false);
   }
 
   private boolean isEnabled(VPTProject p) {
@@ -271,7 +306,7 @@ public class SbtConsole extends JPanel {
 
   private class SbtHandler implements Visitor {
 
-    private final String monitor;
+    private final String monitorCmd;
     private final StringBuilder errorStream;
     private final StringBuilder output;
 
@@ -284,9 +319,9 @@ public class SbtConsole extends JPanel {
     private boolean registered;
     private DefaultError error;
 
-    SbtHandler(String monitor) {
-      this.monitor = (monitor != null && !monitor.isEmpty()) ?
-          monitor : null;
+    SbtHandler(String monitorCmd) {
+      this.monitorCmd = (monitorCmd != null && !monitorCmd.isEmpty()) ?
+          monitorCmd : null;
       this.errorStream = new StringBuilder();
       this.output = new StringBuilder();
       this.errorSource = new DefaultErrorSource(
@@ -318,8 +353,8 @@ public class SbtConsole extends JPanel {
             waiting = false;
             notifyAll();
           }
-        } else if (monitor != null) {
-          runCommand(monitor);
+        } else if (monitorCmd != null && monitor.isSelected()) {
+          runCommand(monitorCmd);
           monitoring = true;
         }
 
@@ -349,14 +384,22 @@ public class SbtConsole extends JPanel {
         }
       }
 
-      command += "\n";
-      try {
-        stdin.write(command.getBytes("UTF-8"));
-        stdin.flush();
-      } catch (IOException ioe) {
-        // Log.
-        ioe.printStackTrace();
+      if (command != null) {
+        command += "\n";
+        try {
+          stdin.write(command.getBytes("UTF-8"));
+          stdin.flush();
+        } catch (IOException ioe) {
+          // Log.
+          ioe.printStackTrace();
+        }
       }
+    }
+
+    void toggleMonitoring() {
+      boolean newMonitorState = !monitoring;
+      runCommand(monitoring ? null : monitorCmd);
+      monitoring = newMonitorState;
     }
 
     private void process(String line) {

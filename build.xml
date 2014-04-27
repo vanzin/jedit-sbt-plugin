@@ -16,6 +16,14 @@
     <filename name="src/main/java/**/*.java" />
   </selector>
 
+  <target name="build.prepare">
+    <copy todir="${build.extras}" includeEmptyDirs="false">
+        <fileset dir="${basedir}/src/main/resources">
+          <filename name="**" />
+        </fileset>
+    </copy>
+  </target>
+
   <path id="class.path">
     <pathelement location="${jedit.plugins.dir}/CommonControls.jar" />
     <pathelement location="${jedit.plugins.dir}/Console.jar" />

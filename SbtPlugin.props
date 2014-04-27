@@ -32,6 +32,7 @@ plugin.sbtplugin.SbtPlugin.menu=\
   sbtconsole
 
 sbtplugin.shell.entry=Command:
+sbtplugin.shell.monitor.tooltip=Enable/Disable Change Monitoring
 
 plugin.sbtplugin.SbtPlugin.option-pane=sbt.global
 options.sbt.global.label=Simple Build Tool
@@ -42,7 +43,7 @@ options.sbt.max_scrollback.error=Invalid value for max lines.
 
 options.sbt.config.label=Simple Build Tool
 options.sbt.config.sbt.enabled=Enable SBT
-options.sbt.config.sbt.monitor_cmd=Monitor Command
+options.sbt.config.sbt.monitor_cmd=Change Monitor Command
 options.sbt.config.sbt.monitor_cmd.tooltip=Command to run when source files change.
 
 options.sbt.config.env.separator=SBT Environment
