@@ -20,8 +20,13 @@ import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
+import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.OutputStream;
+import java.util.Queue;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ThreadFactory;
@@ -48,6 +53,7 @@ import org.gjt.sp.jedit.EditBus.EBHandler;
 import org.gjt.sp.jedit.View;
 import org.gjt.sp.jedit.gui.HistoryTextField;
 import org.gjt.sp.jedit.msg.PropertiesChanged;
+import org.gjt.sp.util.IOUtilities;
 import org.gjt.sp.util.Log;
 
 import common.io.ProcessExecutor;
@@ -93,11 +99,13 @@ public class SbtConsole extends JPanel {
   private Color errorColor;
 
   private SbtHandler handler;
+  private Process sbtProcess;
   private ProcessExecutor sbt;
   private OutputStream stdin;
   private int bufferLineCount;
   private int maxScrollback;
   private ExecutorService streams;
+  private File wrapper;
 
   public SbtConsole(View view) {
     super(new BorderLayout());
@@ -193,6 +201,25 @@ public class SbtConsole extends JPanel {
       return;
     }
 
+    InputStream in = null;
+    OutputStream out = null;
+    try {
+      wrapper = File.createTempFile("sbt-wrapper.", ".py");
+      in = getClass().getResourceAsStream("/sbt_wrapper.py");
+      out = new FileOutputStream(wrapper);
+      IOUtilities.copyStream(null, in, out, false);
+    } catch (IOException ioe) {
+      JOptionPane.showMessageDialog(view,
+          jEdit.getProperty("sbt.error.child",
+                            new Object[] { ioe.getMessage() }));
+      ioe.printStackTrace();
+      return;
+    } finally {
+      IOUtilities.closeQuietly(in);
+      IOUtilities.closeQuietly(out);
+    }
+    wrapper.setExecutable(true);
+
     this.streams = Executors.newFixedThreadPool(2,
       new ThreadFactory() {
         private final AtomicInteger id = new AtomicInteger();
@@ -207,6 +234,7 @@ public class SbtConsole extends JPanel {
       });
 
     ProcessExecutor pe = new ProcessExecutor(
+        wrapper.getAbsolutePath(),
         SbtGlobalOptions.getSbtCommand(),
         "-Dsbt.log.noformat=true");
     pe.setExecutor(streams);
@@ -220,8 +248,7 @@ public class SbtConsole extends JPanel {
     pe.addVisitor(handler);
 
     try {
-      Process p = pe.start();
-      stdin = p.getOutputStream();
+      this.sbtProcess = pe.start();
     } catch (IOException ioe) {
       JOptionPane.showMessageDialog(view,
           jEdit.getProperty("sbt.error.child",
@@ -230,6 +257,7 @@ public class SbtConsole extends JPanel {
       streams = null;
       return;
     }
+    this.stdin = sbtProcess.getOutputStream();
     this.sbt = pe;
     entryPanel.setEnabled(true);
     monitor.setSelected(true);
@@ -237,13 +265,13 @@ public class SbtConsole extends JPanel {
 
   private void stopSbt() {
     if (sbt != null) {
-      handler.runCommand("exit");
       try {
-        sbt.waitFor();
+        handler.stopNow();
       } catch (InterruptedException ie) {
         // Nothing to do.
       }
       streams.shutdown();
+      wrapper.delete();
     }
     try {
       document.remove(0, document.getLength());
@@ -255,6 +283,7 @@ public class SbtConsole extends JPanel {
     this.sbt = null;
     this.handler = null;
     this.streams = null;
+    this.wrapper = null;
     entryPanel.setEnabled(false);
   }
 
@@ -309,10 +338,11 @@ public class SbtConsole extends JPanel {
     private final String monitorCmd;
     private final StringBuilder errorStream;
     private final StringBuilder output;
+    private final Queue<String> commandQueue;
 
-    private boolean waiting;
     private boolean monitoring;
     private boolean inWait;
+    private boolean inPrompt;
     private Color currMatch;
 
     private final DefaultErrorSource errorSource;
@@ -326,11 +356,13 @@ public class SbtConsole extends JPanel {
       this.output = new StringBuilder();
       this.errorSource = new DefaultErrorSource(
           jEdit.getProperty("sbt.error_source_name"), view);
+      this.commandQueue = new ConcurrentLinkedQueue<>();
     }
 
     @Override
     public boolean process(byte[] buf, int len, boolean isError) {
       StringBuilder target = isError ? errorStream : output;
+      inPrompt = false;
 
       if (buf != null) {
         for (int i = 0; i < len; i++) {
@@ -348,16 +380,15 @@ public class SbtConsole extends JPanel {
       }
 
       if (target.toString().equals("> ")) {
-        if (waiting) {
-          synchronized (this) {
-            waiting = false;
-            notifyAll();
-          }
-        } else if (monitorCmd != null && monitor.isSelected()) {
-          runCommand(monitorCmd);
-          monitoring = true;
+        if (commandQueue.isEmpty() && monitorCmd != null &&
+            monitor.isSelected()) {
+          commandQueue.offer(monitorCmd);
+          nextCommand();
+        } else if (!commandQueue.isEmpty()) {
+          nextCommand();
+        } else {
+          inPrompt = true;
         }
-
         append(target.toString(), null);
         target.setLength(0);
       }
@@ -365,41 +396,59 @@ public class SbtConsole extends JPanel {
     }
 
     void runCommand(String command) {
+      if (command != null) {
+        commandQueue.offer(command);
+      }
       if (monitoring) {
         try {
-          waiting = true;
-          synchronized (this) {
-            // Stop monitoring and wait for a prompt.
-            stdin.write("\n".getBytes("UTF-8"));
-            stdin.flush();
-            while (waiting) {
-              wait();
-            }
-            monitoring = false;
-          }
-        } catch (IOException ioe) {
-          ioe.printStackTrace();
-        } catch (InterruptedException ie) {
-          ie.printStackTrace();
-        }
-      }
-
-      if (command != null) {
-        command += "\n";
-        try {
-          stdin.write(command.getBytes("UTF-8"));
+          monitoring = false;
+          stdin.write("\n".getBytes("UTF-8"));
           stdin.flush();
         } catch (IOException ioe) {
-          // Log.
           ioe.printStackTrace();
         }
+      } else if (!commandQueue.isEmpty()) {
+        nextCommand();
       }
+    }
+
+    void stopNow() throws InterruptedException {
+      runCommand("exit");
+      if (!inWait && !inPrompt) {
+        try {
+          stdin.close();
+        } catch (IOException ioe) {
+          ioe.printStackTrace();
+        }
+        sbtProcess.destroy();
+      }
+      sbt.waitFor();
     }
 
     void toggleMonitoring() {
       boolean newMonitorState = !monitoring;
       runCommand(monitoring ? null : monitorCmd);
       monitoring = newMonitorState;
+    }
+
+    private synchronized void nextCommand() {
+      String command = commandQueue.poll();
+      if (command == null) {
+        return;
+      }
+
+      unregisterSource();
+      try {
+        stdin.write((command  + "\n").getBytes("UTF-8"));
+        stdin.flush();
+      } catch (IOException ioe) {
+        // Log.
+        ioe.printStackTrace();
+      }
+
+      if (command.startsWith("~ ")) {
+        monitoring = true;
+      }
     }
 
     private void process(String line) {
@@ -426,10 +475,8 @@ public class SbtConsole extends JPanel {
       }
 
       if (inWait) {
-        registered = false;
-        errorSource.clear();
+        unregisterSource();
         inWait = false;
-        ErrorSource.unregisterErrorSource(errorSource);
       } else {
         Matcher m = WAITING.matcher(line);
         if (m.matches()) {
@@ -438,6 +485,12 @@ public class SbtConsole extends JPanel {
       }
 
       append(line, highlight);
+    }
+
+    private void unregisterSource() {
+      registered = false;
+      errorSource.clear();
+      ErrorSource.unregisterErrorSource(errorSource);
     }
 
     private boolean isMatch(String line, Pattern regex) {
@@ -481,7 +534,13 @@ public class SbtConsole extends JPanel {
       if ("exit".equals(command)) {
         return;
       }
-      handler.runCommand(command);
+      if (command.isEmpty()) {
+        if (monitor.isSelected()) {
+          handler.toggleMonitoring();
+        }
+      } else {
+        handler.runCommand(command);
+      }
       entry.setText("");
     }
 
