@@ -25,6 +25,8 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Queue;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Executors;
@@ -62,6 +64,7 @@ import errorlist.DefaultErrorSource;
 import errorlist.DefaultErrorSource.DefaultError;
 import errorlist.ErrorSource;
 import projectviewer.ProjectViewer;
+import projectviewer.event.ProjectUpdate;
 import projectviewer.event.ViewerUpdate;
 import projectviewer.vpt.VPTProject;
 
@@ -98,6 +101,7 @@ public class SbtConsole extends JPanel {
   private Color warningColor;
   private Color errorColor;
 
+  private Map<String, String> sbtEnv;
   private SbtHandler handler;
   private Process sbtProcess;
   private ProcessExecutor sbt;
@@ -190,6 +194,39 @@ public class SbtConsole extends JPanel {
     startSbt((VPTProject) update.getNode());
   }
 
+  @EBHandler
+  public void projectUpdate(ProjectUpdate update) {
+    if (update.getType() != ProjectUpdate.Type.PROPERTIES_CHANGED) {
+      return;
+    }
+
+    VPTProject project = update.getProject();
+    Map<String, String> env = new HashMap<>();
+    for (SbtOptionsPane.EnvVar v : SbtOptionsPane.getEnv(project)) {
+      env.put(v.name, v.value);
+    }
+
+    boolean stopped = false;
+    if (!env.equals(sbtEnv) || !isEnabled(project)) {
+      stopSbt();
+      stopped = true;
+    }
+
+    if (stopped || (sbt == null && isEnabled(project))) {
+      startSbt(project);
+    }
+
+    // Will set the message if sbt is disabled.
+    if (sbt == null) {
+      return;
+    }
+
+    String monitor = SbtOptionsPane.getMonitorCmd(project);
+    if (!monitor.equals(handler.monitorCmd)) {
+      handler.setMonitorCmd(monitor);
+    }
+  }
+
   private void startSbt(final VPTProject project) {
     if (project == null || !isEnabled(project)) {
       try {
@@ -240,8 +277,11 @@ public class SbtConsole extends JPanel {
         "-Dsbt.log.noformat=true");
     pe.setExecutor(streams);
     pe.addCurrentEnv();
+
+    Map<String, String> env = new HashMap<>();
     for (SbtOptionsPane.EnvVar v : SbtOptionsPane.getEnv(project)) {
       pe.addEnv(v.name, v.value);
+      env.put(v.name, v.value);
     }
     pe.setDirectory(project.getRootPath());
 
@@ -260,6 +300,7 @@ public class SbtConsole extends JPanel {
     }
     this.stdin = sbtProcess.getOutputStream();
     this.sbt = pe;
+    this.sbtEnv = env;
     entryPanel.setEnabled(true);
     monitor.setSelected(true);
   }
@@ -336,7 +377,7 @@ public class SbtConsole extends JPanel {
 
   private class SbtHandler implements Visitor {
 
-    private final String monitorCmd;
+    private String monitorCmd;
     private final StringBuilder errorStream;
     private final StringBuilder output;
     private final Queue<String> commandQueue;
@@ -410,6 +451,18 @@ public class SbtConsole extends JPanel {
         }
       } else if (!commandQueue.isEmpty()) {
         nextCommand();
+      }
+    }
+
+    void setMonitorCmd(String cmd) {
+      boolean toggle = false;
+      if (monitoring) {
+        toggle = true;
+        toggleMonitoring();
+      }
+      this.monitorCmd = cmd;
+      if (toggle) {
+        toggleMonitoring();
       }
     }
 
