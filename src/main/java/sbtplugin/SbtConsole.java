@@ -234,6 +234,7 @@ public class SbtConsole extends JPanel {
       });
 
     ProcessExecutor pe = new ProcessExecutor(
+        "python", "-u",
         wrapper.getAbsolutePath(),
         SbtGlobalOptions.getSbtCommand(),
         "-Dsbt.log.noformat=true");
