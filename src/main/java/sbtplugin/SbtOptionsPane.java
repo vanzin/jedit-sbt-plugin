@@ -45,14 +45,12 @@ public class SbtOptionsPane extends AbstractOptionPane {
   private static final String LABEL_PREFIX = "options.sbt.config.";
 
   public static final String SBT_ENABLED = "sbt.enabled";
-  private static final String SBT_MONITOR_CMD = "sbt.monitor_cmd";
   private static final String SBT_ENV_VAR_NAME = "sbt.env.%d.name";
   private static final String SBT_ENV_VAR_VALUE = "sbt.env.%d.value";
 
   private final VPTProject project;
 
   private JCheckBox enabled;
-  private JTextField monitor;
 
   private JTextField envName;
   private JTextField envValue;
@@ -71,11 +69,6 @@ public class SbtOptionsPane extends AbstractOptionPane {
     addComponent(getLabel(SBT_ENABLED), this.enabled);
 
     Properties props = project.getProperties();
-
-    this.monitor = new JTextField();
-    this.monitor.setText(getMonitorCmd(project));
-    this.monitor.setToolTipText(getLabel(SBT_MONITOR_CMD + ".tooltip"));
-    addComponent(getLabel(SBT_MONITOR_CMD), this.monitor);
 
     addSeparator(getLabel("env.separator"));
 
@@ -183,7 +176,6 @@ public class SbtOptionsPane extends AbstractOptionPane {
     Properties props = project.getProperties();
 
     props.setProperty(SBT_ENABLED, String.valueOf(enabled.isSelected()));
-    props.setProperty(SBT_MONITOR_CMD, monitor.getText());
 
     int i;
     for (i = 0; i < envModel.getSize(); i++) {
@@ -228,10 +220,6 @@ public class SbtOptionsPane extends AbstractOptionPane {
       idx++;
     }
     return env;
-  }
-
-  public static String getMonitorCmd(VPTProject project) {
-    return project.getProperties().getProperty(SBT_MONITOR_CMD);
   }
 
   private String getLabel(String opt) {

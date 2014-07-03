@@ -94,7 +94,6 @@ public class SbtConsole extends JPanel {
 
   private final JPanel entryPanel;
   private final HistoryTextField entry;
-  private final JToggleButton monitor;
 
   private Color plainColor;
   private Color infoColor;
@@ -125,28 +124,6 @@ public class SbtConsole extends JPanel {
     entry.addActionListener(new CommandRunner());
     entryPanel.add(BorderLayout.CENTER, entry);
 
-    JPanel buttons = new JPanel(new FlowLayout());
-    buttons.setComponentOrientation(ComponentOrientation.LEFT_TO_RIGHT);
-
-    monitor = new JToggleButton();
-    monitor.setIcon(new ImageIcon(
-        getClass().getResource("/watch.png")));
-    monitor.setSelected(true);
-    monitor.setToolTipText(
-        jEdit.getProperty("sbtplugin.shell.monitor.tooltip"));
-    monitor.setPreferredSize(new Dimension(24, 24));
-    monitor.addActionListener(new ActionListener() {
-      @Override
-      public void actionPerformed(ActionEvent ae) {
-        if (handler != null) {
-          handler.toggleMonitoring();
-        }
-      }
-    });
-
-    buttons.add(monitor);
-
-    entryPanel.add(BorderLayout.EAST, buttons);
     add(BorderLayout.NORTH, entryPanel);
 
     document = new DefaultStyledDocument();
@@ -220,11 +197,6 @@ public class SbtConsole extends JPanel {
     if (sbt == null) {
       return;
     }
-
-    String monitor = SbtOptionsPane.getMonitorCmd(project);
-    if (!monitor.equals(handler.monitorCmd)) {
-      handler.setMonitorCmd(monitor);
-    }
   }
 
   private void startSbt(final VPTProject project) {
@@ -285,7 +257,7 @@ public class SbtConsole extends JPanel {
     }
     pe.setDirectory(project.getRootPath());
 
-    this.handler = new SbtHandler(SbtOptionsPane.getMonitorCmd(project));
+    this.handler = new SbtHandler();
     pe.addVisitor(handler);
 
     try {
@@ -302,7 +274,6 @@ public class SbtConsole extends JPanel {
     this.sbt = pe;
     this.sbtEnv = env;
     entryPanel.setEnabled(true);
-    monitor.setSelected(true);
   }
 
   private void stopSbt() {
@@ -377,7 +348,6 @@ public class SbtConsole extends JPanel {
 
   private class SbtHandler implements Visitor {
 
-    private String monitorCmd;
     private final StringBuilder errorStream;
     private final StringBuilder output;
     private final Queue<String> commandQueue;
@@ -391,9 +361,7 @@ public class SbtConsole extends JPanel {
     private boolean registered;
     private DefaultError error;
 
-    SbtHandler(String monitorCmd) {
-      this.monitorCmd = (monitorCmd != null && !monitorCmd.isEmpty()) ?
-          monitorCmd : null;
+    SbtHandler() {
       this.errorStream = new StringBuilder();
       this.output = new StringBuilder();
       this.errorSource = new DefaultErrorSource(
@@ -422,11 +390,7 @@ public class SbtConsole extends JPanel {
       }
 
       if (target.toString().equals("> ")) {
-        if (commandQueue.isEmpty() && monitorCmd != null &&
-            monitor.isSelected()) {
-          commandQueue.offer(monitorCmd);
-          nextCommand();
-        } else if (!commandQueue.isEmpty()) {
+        if (!commandQueue.isEmpty()) {
           nextCommand();
         } else {
           inPrompt = true;
@@ -438,31 +402,22 @@ public class SbtConsole extends JPanel {
     }
 
     void runCommand(String command) {
-      if (command != null) {
-        commandQueue.offer(command);
-      }
       if (monitoring) {
         try {
-          monitoring = false;
           stdin.write("\n".getBytes("UTF-8"));
           stdin.flush();
+          monitoring = false;
         } catch (IOException ioe) {
           ioe.printStackTrace();
         }
-      } else if (!commandQueue.isEmpty()) {
-        nextCommand();
-      }
-    }
-
-    void setMonitorCmd(String cmd) {
-      boolean toggle = false;
-      if (monitoring) {
-        toggle = true;
-        toggleMonitoring();
-      }
-      this.monitorCmd = cmd;
-      if (toggle) {
-        toggleMonitoring();
+        if (!command.isEmpty()) {
+          commandQueue.offer(command);
+        }
+      } else {
+        commandQueue.offer(command);
+        if (inPrompt) {
+          nextCommand();
+        }
       }
     }
 
@@ -477,12 +432,6 @@ public class SbtConsole extends JPanel {
         sbtProcess.destroy();
       }
       sbt.waitFor();
-    }
-
-    void toggleMonitoring() {
-      boolean newMonitorState = !monitoring;
-      runCommand(monitoring ? null : monitorCmd);
-      monitoring = newMonitorState;
     }
 
     private synchronized void nextCommand() {
@@ -500,7 +449,7 @@ public class SbtConsole extends JPanel {
         ioe.printStackTrace();
       }
 
-      if (command.startsWith("~ ")) {
+      if (command.startsWith("~")) {
         monitoring = true;
       }
     }
@@ -588,13 +537,7 @@ public class SbtConsole extends JPanel {
       if ("exit".equals(command)) {
         return;
       }
-      if (command.isEmpty()) {
-        if (monitor.isSelected()) {
-          handler.toggleMonitoring();
-        }
-      } else {
-        handler.runCommand(command);
-      }
+      handler.runCommand(command);
       entry.setText("");
     }
 
