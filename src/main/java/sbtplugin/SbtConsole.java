@@ -36,6 +36,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import javax.swing.ImageIcon;
+import javax.swing.JButton;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
@@ -94,6 +95,7 @@ public class SbtConsole extends JPanel {
 
   private final JPanel entryPanel;
   private final HistoryTextField entry;
+  private final JButton clearButton;
 
   private Color plainColor;
   private Color infoColor;
@@ -124,8 +126,34 @@ public class SbtConsole extends JPanel {
     entry = new HistoryTextField(HISTORY_KEY);
     entry.setEnterAddsToHistory();
     entry.addActionListener(new CommandRunner());
+
     entryPanel.add(BorderLayout.CENTER, entry);
 
+    JPanel buttons = new JPanel(new FlowLayout());
+    buttons.setComponentOrientation(ComponentOrientation.LEFT_TO_RIGHT);
+
+    clearButton = new JButton();
+    clearButton.setIcon(new ImageIcon(
+      getClass().getResource("/clear.png")));
+    clearButton.setPreferredSize(new Dimension(24, 24));
+    clearButton.addActionListener(new ActionListener() {
+      @Override
+      public void actionPerformed(ActionEvent ae) {
+        if (sbt != null) {
+          try {
+            document.remove(0, document.getLength());
+            if (handler.inPrompt) {
+              appendToConsole("> ", plainColor);
+            }
+          } catch (BadLocationException e) {
+            Log.log(Log.ERROR, this, e);
+          }
+        }
+      }
+    });
+    buttons.add(clearButton);
+
+    entryPanel.add(BorderLayout.EAST, buttons);
     add(BorderLayout.NORTH, entryPanel);
 
     document = new DefaultStyledDocument();
