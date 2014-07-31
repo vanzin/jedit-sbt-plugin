@@ -38,12 +38,14 @@ import javax.swing.ListSelectionModel;
 import org.gjt.sp.jedit.AbstractOptionPane;
 import org.gjt.sp.jedit.jEdit;
 
+import common.gui.FileTextField;
 import projectviewer.vpt.VPTProject;
 
 public class SbtOptionsPane extends AbstractOptionPane {
 
   private static final String LABEL_PREFIX = "options.sbt.config.";
 
+  public static final String SBT_CMD_LINE_ARGS = "sbt.cmdline.args";
   public static final String SBT_ENABLED = "sbt.enabled";
   private static final String SBT_ENV_VAR_NAME = "sbt.env.%d.name";
   private static final String SBT_ENV_VAR_VALUE = "sbt.env.%d.value";
@@ -51,6 +53,8 @@ public class SbtOptionsPane extends AbstractOptionPane {
   private final VPTProject project;
 
   private JCheckBox enabled;
+  private FileTextField sbtCommand;
+  private JTextField cmdLineArgs;
 
   private JTextField envName;
   private JTextField envValue;
@@ -67,6 +71,15 @@ public class SbtOptionsPane extends AbstractOptionPane {
     this.enabled = new JCheckBox();
     this.enabled.setSelected(getBoolean(SBT_ENABLED));
     addComponent(getLabel(SBT_ENABLED), this.enabled);
+
+    this.sbtCommand = new FileTextField(
+      get(project, SbtGlobalOptions.SBT_COMMAND), false);
+    addComponent(jEdit.getProperty("options.sbt.command"),
+        this.sbtCommand);
+
+    this.cmdLineArgs = new JTextField();
+    this.cmdLineArgs.setText(get(project, SBT_CMD_LINE_ARGS));
+    addComponent(getLabel(SBT_CMD_LINE_ARGS), this.cmdLineArgs);
 
     Properties props = project.getProperties();
 
@@ -176,6 +189,13 @@ public class SbtOptionsPane extends AbstractOptionPane {
     Properties props = project.getProperties();
 
     props.setProperty(SBT_ENABLED, String.valueOf(enabled.isSelected()));
+    if (!sbtCommand.getTextField().getText().isEmpty()) {
+      props.setProperty(SbtGlobalOptions.SBT_COMMAND,
+          sbtCommand.getTextField().getText());
+    } else {
+      props.remove(SbtGlobalOptions.SBT_COMMAND);
+    }
+    props.setProperty(SBT_CMD_LINE_ARGS, cmdLineArgs.getText());
 
     int i;
     for (i = 0; i < envModel.getSize(); i++) {
@@ -202,8 +222,18 @@ public class SbtOptionsPane extends AbstractOptionPane {
     return getBoolean(project, name);
   }
 
+  public static String get(VPTProject p, String name) {
+    return p.getProperties().getProperty(name);
+  }
+
   public static boolean getBoolean(VPTProject p, String name) {
-    return "true".equalsIgnoreCase(p.getProperties().getProperty(name));
+    return "true".equalsIgnoreCase(get(p, name));
+  }
+
+  public static String getSbtCommand(VPTProject p) {
+    String projectCmd = get(p, SbtGlobalOptions.SBT_COMMAND);
+    return projectCmd != null ? projectCmd
+      : SbtGlobalOptions.getSbtCommand();
   }
 
   public static List<EnvVar> getEnv(VPTProject project) {

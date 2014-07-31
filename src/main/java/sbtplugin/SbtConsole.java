@@ -100,6 +100,8 @@ public class SbtConsole extends JPanel {
   private Color warningColor;
   private Color errorColor;
 
+  private String sbtCommand;
+  private String sbtCmdLineArgs;
   private Map<String, String> sbtEnv;
   private SbtHandler handler;
   private Process sbtProcess;
@@ -183,13 +185,26 @@ public class SbtConsole extends JPanel {
       env.put(v.name, v.value);
     }
 
-    boolean stopped = false;
-    if (!env.equals(sbtEnv) || !isEnabled(project)) {
-      stopSbt();
-      stopped = true;
+    boolean stop = false;
+
+    if (!SbtOptionsPane.getSbtCommand(project).equals(sbtCommand)) {
+      stop = true;
     }
 
-    if (stopped || (sbt == null && isEnabled(project))) {
+    if (!SbtOptionsPane.get(project, SbtOptionsPane.SBT_CMD_LINE_ARGS)
+      .equals(sbtCmdLineArgs)) {
+      stop = true;
+    }
+
+    if (!env.equals(sbtEnv) || !isEnabled(project)) {
+      stop = true;
+    }
+
+    if (stop) {
+      stopSbt();
+    }
+
+    if (stop || (sbt == null && isEnabled(project))) {
       startSbt(project);
     }
 
@@ -242,11 +257,22 @@ public class SbtConsole extends JPanel {
         }
       });
 
-    ProcessExecutor pe = new ProcessExecutor(
-        "python", "-u",
-        wrapper.getAbsolutePath(),
-        SbtGlobalOptions.getSbtCommand(),
-        "-Dsbt.log.noformat=true");
+    String sbtCommand = SbtOptionsPane.getSbtCommand(project);
+    String cmdLineArgs = SbtOptionsPane.get(project,
+      SbtOptionsPane.SBT_CMD_LINE_ARGS);
+    String[] args;
+    if (cmdLineArgs != null && !cmdLineArgs.isEmpty()) {
+      args = new String[5];
+      args[4] = cmdLineArgs;
+    } else {
+      args = new String[4];
+    }
+    args[0] = "python";
+    args[1] = "-u";
+    args[2] = wrapper.getAbsolutePath();
+    args[3] = sbtCommand;
+
+    ProcessExecutor pe = new ProcessExecutor(args);
     pe.setExecutor(streams);
     pe.addCurrentEnv();
 
@@ -273,6 +299,8 @@ public class SbtConsole extends JPanel {
     this.stdin = sbtProcess.getOutputStream();
     this.sbt = pe;
     this.sbtEnv = env;
+    this.sbtCommand = sbtCommand;
+    this.sbtCmdLineArgs = cmdLineArgs;
     entryPanel.setEnabled(true);
   }
 
@@ -297,6 +325,9 @@ public class SbtConsole extends JPanel {
     this.handler = null;
     this.streams = null;
     this.wrapper = null;
+    this.sbtCommand = null;
+    this.sbtCmdLineArgs = null;
+    this.sbtEnv = null;
     entryPanel.setEnabled(false);
   }
 

@@ -13,10 +13,14 @@
 #
 import errno
 import os
+import shlex
 import signal
 import sys
 
 child = None
+args = [ sys.argv[1], '-Dsbt.log.noformat=true' ]
+if len(sys.argv) > 2:
+  args += shlex.split(sys.argv[2])
 
 def kill_child(signum, frame):
   if child:
@@ -26,7 +30,7 @@ signal.signal(signal.SIGTERM, kill_child)
 child = os.fork()
 if child == 0:
   os.setsid()
-  os.execvp(sys.argv[1], sys.argv[1:])
+  os.execvp(args[0], args)
 
 while True:
   try:

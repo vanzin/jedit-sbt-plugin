@@ -23,7 +23,7 @@ import common.gui.FileTextField;
 
 public class SbtGlobalOptions extends AbstractOptionPane {
 
-  private static final String SBT_COMMAND = "sbt.command";
+  static final String SBT_COMMAND = "sbt.command";
   private static final String SBT_MAX_SCROLLBACK = "sbt.max_scrollback";
   private static final int SBT_MAX_SCROLLBACK_DEFAULT = 1024;
 

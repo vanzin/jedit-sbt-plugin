@@ -42,6 +42,7 @@ options.sbt.max_scrollback.error=Invalid value for max lines.
 
 options.sbt.config.label=Simple Build Tool
 options.sbt.config.sbt.enabled=Enable SBT
+options.sbt.config.sbt.cmdline.args=Command line arguments:
 
 options.sbt.config.env.separator=SBT Environment
 options.sbt.config.env.name=Name:
