@@ -96,6 +96,7 @@ public class SbtConsole extends JPanel {
   private final JPanel entryPanel;
   private final HistoryTextField entry;
   private final JButton clearButton;
+  private final JButton reloadButton;
 
   private Color plainColor;
   private Color infoColor;
@@ -113,6 +114,7 @@ public class SbtConsole extends JPanel {
   private int maxScrollback;
   private ExecutorService streams;
   private File wrapper;
+  private VPTProject project;
 
   public SbtConsole(View view) {
     super(new BorderLayout());
@@ -152,6 +154,22 @@ public class SbtConsole extends JPanel {
       }
     });
     buttons.add(clearButton);
+
+    reloadButton = new JButton();
+    reloadButton.setIcon(new ImageIcon(
+      getClass().getResource("/reload.png")));
+    reloadButton.setPreferredSize(new Dimension(24, 24));
+    reloadButton.addActionListener(new ActionListener() {
+      @Override
+      public void actionPerformed(ActionEvent ae) {
+        if (sbt != null) {
+          VPTProject p = project;
+          stopSbt();
+          startSbt(p);
+        }
+      }
+    });
+    buttons.add(reloadButton);
 
     entryPanel.add(BorderLayout.EAST, buttons);
     add(BorderLayout.NORTH, entryPanel);
@@ -329,6 +347,7 @@ public class SbtConsole extends JPanel {
     this.sbtEnv = env;
     this.sbtCommand = sbtCommand;
     this.sbtCmdLineArgs = cmdLineArgs;
+    this.project = project;
     entryPanel.setEnabled(true);
   }
 
@@ -348,6 +367,7 @@ public class SbtConsole extends JPanel {
       ble.printStackTrace();
     }
     bufferLineCount = 0;
+    handler.unregisterSource();
 
     this.sbt = null;
     this.handler = null;
@@ -356,6 +376,7 @@ public class SbtConsole extends JPanel {
     this.sbtCommand = null;
     this.sbtCmdLineArgs = null;
     this.sbtEnv = null;
+    this.project = null;
     entryPanel.setEnabled(false);
   }
 
@@ -552,9 +573,11 @@ public class SbtConsole extends JPanel {
     }
 
     private void unregisterSource() {
-      registered = false;
-      errorSource.clear();
-      ErrorSource.unregisterErrorSource(errorSource);
+      if (registered) {
+        registered = false;
+        errorSource.clear();
+        ErrorSource.unregisterErrorSource(errorSource);
+      }
     }
 
     private boolean isMatch(String line, Pattern regex) {
