@@ -142,8 +142,8 @@ public class SbtConsole extends JPanel {
         if (sbt != null) {
           try {
             document.remove(0, document.getLength());
-            if (handler.inPrompt) {
-              appendToConsole("> ", plainColor);
+            if (handler.prompt != null) {
+              appendToConsole(handler.prompt, plainColor);
             }
           } catch (BadLocationException e) {
             Log.log(Log.ERROR, this, e);
@@ -413,7 +413,7 @@ public class SbtConsole extends JPanel {
 
     private boolean monitoring;
     private boolean inWait;
-    private boolean inPrompt;
+    private String prompt;
     private Color currMatch;
 
     private final DefaultErrorSource errorSource;
@@ -431,7 +431,7 @@ public class SbtConsole extends JPanel {
     @Override
     public boolean process(byte[] buf, int len, boolean isError) {
       StringBuilder target = isError ? errorStream : output;
-      inPrompt = false;
+      prompt = null;
 
       if (buf != null) {
         for (int i = 0; i < len; i++) {
@@ -448,13 +448,14 @@ public class SbtConsole extends JPanel {
         process(line);
       }
 
-      if (target.toString().equals("> ")) {
+      String currTarget = target.toString();
+      if (currTarget.equals("> ") || currTarget.endsWith("? ")) {
+        append(currTarget, null);
         if (!commandQueue.isEmpty()) {
           nextCommand();
         } else {
-          inPrompt = true;
+          prompt = currTarget;
         }
-        append(target.toString(), null);
         target.setLength(0);
       }
       return true;
@@ -474,15 +475,16 @@ public class SbtConsole extends JPanel {
         }
       } else {
         commandQueue.offer(command);
-        if (inPrompt) {
+        if (prompt != null) {
           nextCommand();
         }
       }
     }
 
     void stopNow() throws InterruptedException {
-      runCommand("exit");
-      if (!inWait && !inPrompt) {
+      if (inWait || "> ".equals(prompt)) {
+        runCommand("exit");
+      } else {
         try {
           stdin.close();
         } catch (IOException ioe) {
