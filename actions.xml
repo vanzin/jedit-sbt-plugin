@@ -1,0 +1,14 @@
+<?xml version="1.0"?>
+<!DOCTYPE ACTIONS SYSTEM "actions.dtd">
+<ACTIONS>
+
+  <ACTION NAME="sbt_command_entry">
+    <CODE>
+        wnd = view.getDockableWindowManager().getDockable("sbtconsole");
+        if (wnd != null) {
+          wnd.focusEntryField();
+        }
+    </CODE>
+  </ACTION>
+
+</ACTIONS>

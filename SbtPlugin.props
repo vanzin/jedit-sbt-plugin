@@ -53,3 +53,4 @@ sbt.disabled.msg=SBT is not enabled for the current project.
 sbt.error.child=Error starting sbt: {0}
 sbt.error_source_name=SBT
 
+sbt_command_entry.label=Sbt Command Entry

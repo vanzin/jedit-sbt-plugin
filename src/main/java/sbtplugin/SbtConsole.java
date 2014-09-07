@@ -25,7 +25,9 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Queue;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -97,6 +99,8 @@ public class SbtConsole extends JPanel {
   private final HistoryTextField entry;
   private final JButton clearButton;
   private final JButton reloadButton;
+
+  private final List<ErrorMatcher> matchers;
 
   private Color plainColor;
   private Color infoColor;
@@ -181,7 +185,17 @@ public class SbtConsole extends JPanel {
     propertiesChanged(null);
     EditBus.addToBus(this);
 
+    this.matchers = new ArrayList<>();
+    matchers.add(new ErrorMatcher(ERROR, EXTRA, ErrorSource.ERROR));
+    matchers.add(new ErrorMatcher(WARNING, EXTRA, ErrorSource.WARNING));
+    matchers.add(new ErrorMatcher(GENERIC_ERROR, null, ErrorSource.ERROR));
+    matchers.add(new ErrorMatcher(GENERIC_WARNING, null, ErrorSource.WARNING));
+
     startSbt(ProjectViewer.getActiveProject(view));
+  }
+
+  public void focusEntryField() {
+    entry.requestFocus();
   }
 
   @EBHandler
@@ -435,7 +449,7 @@ public class SbtConsole extends JPanel {
     private boolean monitoring;
     private boolean inWait;
     private String prompt;
-    private Color currMatch;
+    private ErrorMatcher currMatcher;
 
     private final DefaultErrorSource errorSource;
     private boolean registered;
@@ -537,26 +551,54 @@ public class SbtConsole extends JPanel {
     }
 
     private void process(String line) {
-      if (isMatch(line, ERROR, ErrorSource.ERROR)) {
-        currMatch = errorColor;
-      } else if (isMatch(line, WARNING, ErrorSource.WARNING)) {
-        currMatch = warningColor;
-      } else if (currMatch != null) {
-        Matcher m = EXTRA.matcher(line);
-        if (m.matches()) {
-          error.addExtraMessage(m.group(1));
-        } else {
-          currMatch = null;
+      // First see if any error matcher's first line regexp matches.
+      // Error matchers are those that can match multiple lines (and
+      // thus have an "extra" regexp). Other matchers are just for
+      // highlighting and do not stop the current matcher.
+      ErrorMatcher match = null;
+      for (ErrorMatcher em : matchers) {
+        if (em.extra != null && isMatch(line, em.first, em.type)) {
+          match = em;
+          break;
         }
       }
 
-      Color highlight = currMatch;
-      if (currMatch == null) {
-        if (isMatch(line, GENERIC_ERROR)) {
-          highlight = errorColor;
-        } else if (isMatch(line, GENERIC_WARNING)) {
-          highlight = warningColor;
+      if (match != null) {
+        currMatcher = match;
+      } else if (currMatcher != null) {
+        Matcher m = currMatcher.extra.matcher(line);
+        if (m.matches()) {
+          error.addExtraMessage(m.group(1));
+        } else {
+          currMatcher = null;
         }
+      }
+
+      // If there isn't a current match, try the generic matchers (those
+      // with no "extra" line matcher).
+      if (currMatcher == null) {
+        for (ErrorMatcher em : matchers) {
+          if (em.extra == null && isMatch(line, em.first, em.type)) {
+            currMatcher = em;
+            break;
+          }
+        }
+      }
+
+      Color highlight = null;
+      if (currMatcher != null) {
+        switch (currMatcher.type) {
+        case ErrorSource.ERROR:
+          highlight = errorColor;
+          break;
+        case ErrorSource.WARNING:
+          highlight = warningColor;
+          break;
+        }
+      }
+
+      if (currMatcher != null && currMatcher.extra == null) {
+        currMatcher = null;
       }
 
       if (inWait) {
@@ -580,22 +622,20 @@ public class SbtConsole extends JPanel {
       }
     }
 
-    private boolean isMatch(String line, Pattern regex) {
-      return regex.matcher(line).matches();
-    }
-
     private boolean isMatch(String line, Pattern regex, int type) {
       Matcher m = regex.matcher(line);
       if (m.matches()) {
-        String path = m.group(1);
-        int lineno = Integer.parseInt(m.group(2));
-        error = new DefaultError(errorSource, type, path, lineno - 1,
-            0, 0, m.group(3));
-        errorSource.addError(error);
+        if (m.groupCount() > 0) {
+          String path = m.group(1);
+          int lineno = Integer.parseInt(m.group(2));
+          error = new DefaultError(errorSource, type, path, lineno - 1,
+              0, 0, m.group(3));
+          errorSource.addError(error);
 
-        if (!registered) {
-          registered = true;
-          ErrorSource.registerErrorSource(errorSource);
+          if (!registered) {
+            registered = true;
+            ErrorSource.registerErrorSource(errorSource);
+          }
         }
         return true;
       }
@@ -623,6 +663,20 @@ public class SbtConsole extends JPanel {
       }
       handler.runCommand(command);
       entry.setText("");
+    }
+
+  }
+
+  private static class ErrorMatcher {
+
+    final Pattern first;
+    final Pattern extra;
+    final int type;
+
+    ErrorMatcher(Pattern first, Pattern extra, int type) {
+      this.first = first;
+      this.extra = extra;
+      this.type = type;
     }
 
   }
