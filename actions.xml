@@ -6,6 +6,7 @@
     <CODE>
         wnd = view.getDockableWindowManager().getDockable("sbtconsole");
         if (wnd != null) {
+          jEdit.getAction("sbtconsole").invoke(view);
           wnd.focusEntryField();
         }
     </CODE>

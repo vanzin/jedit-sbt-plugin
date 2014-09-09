@@ -375,12 +375,18 @@ public class SbtConsole extends JPanel {
       streams.shutdown();
       wrapper.delete();
     }
+
     try {
       document.remove(0, document.getLength());
     } catch (BadLocationException ble) {
       ble.printStackTrace();
     }
     bufferLineCount = 0;
+
+    if (sbt == null) {
+      return;
+    }
+
     handler.unregisterSource();
 
     this.sbt = null;
