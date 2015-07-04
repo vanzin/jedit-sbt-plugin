@@ -146,13 +146,9 @@ public class SbtConsole extends JPanel {
       @Override
       public void actionPerformed(ActionEvent ae) {
         if (sbt != null) {
-          try {
-            document.remove(0, document.getLength());
-            if (handler.prompt != null) {
-              appendToConsole(handler.prompt, plainColor);
-            }
-          } catch (BadLocationException e) {
-            Log.log(Log.ERROR, this, e);
+          clearBuffer();
+          if (handler.prompt != null) {
+            appendToConsole(handler.prompt, plainColor);
           }
         }
       }
@@ -376,12 +372,7 @@ public class SbtConsole extends JPanel {
       wrapper.delete();
     }
 
-    try {
-      document.remove(0, document.getLength());
-    } catch (BadLocationException ble) {
-      ble.printStackTrace();
-    }
-    bufferLineCount = 0;
+    clearBuffer();
 
     if (sbt == null) {
       return;
@@ -444,6 +435,15 @@ public class SbtConsole extends JPanel {
     } catch (BadLocationException ble) {
       ble.printStackTrace();
     }
+  }
+
+  private void clearBuffer() {
+    try {
+      document.remove(0, document.getLength());
+    } catch (BadLocationException ble) {
+      Log.log(Log.ERROR, this, ble);
+    }
+    bufferLineCount = 0;
   }
 
   private class SbtHandler implements Visitor {
