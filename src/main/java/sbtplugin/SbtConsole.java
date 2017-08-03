@@ -62,6 +62,7 @@ import org.gjt.sp.jedit.EditBus.EBHandler;
 import org.gjt.sp.jedit.View;
 import org.gjt.sp.jedit.gui.HistoryTextField;
 import org.gjt.sp.jedit.msg.PropertiesChanged;
+import org.gjt.sp.jedit.msg.ViewUpdate;
 import org.gjt.sp.util.IOUtilities;
 import org.gjt.sp.util.Log;
 
@@ -278,6 +279,14 @@ public class SbtConsole extends JPanel {
     // Will set the message if sbt is disabled.
     if (sbt == null) {
       return;
+    }
+  }
+
+  @EBHandler
+  public void viewUpdate(ViewUpdate vu) {
+    if (vu.getView() == view && vu.getWhat() == ViewUpdate.CLOSED) {
+      EditBus.removeFromBus(this);
+      stopSbt();
     }
   }
 
