@@ -25,15 +25,19 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.util.Arrays;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Queue;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -91,6 +95,8 @@ public class SbtConsole extends JPanel {
   private static final Pattern WAITING =
       Pattern.compile("[0-9]+\\. Waiting for source changes\\.\\.\\..*[\r\n]+");
 
+  private static final ConsoleUpdate POISON_PILL = new ConsoleUpdate(null, null);
+
   private final JTextPane console;
   private final DefaultStyledDocument document;
   private final View view;
@@ -101,6 +107,8 @@ public class SbtConsole extends JPanel {
   private final JButton reloadButton;
 
   private final List<ErrorMatcher> matchers;
+
+  private final BlockingQueue<ConsoleUpdate> updates;
 
   private Color plainColor;
   private Color infoColor;
@@ -117,6 +125,7 @@ public class SbtConsole extends JPanel {
   private int bufferLineCount;
   private int maxScrollback;
   private ExecutorService streams;
+  private ExecutorService drainer;
   private File wrapper;
   private VPTProject project;
 
@@ -186,6 +195,8 @@ public class SbtConsole extends JPanel {
     matchers.add(new ErrorMatcher(WARNING, EXTRA, ErrorSource.WARNING));
     matchers.add(new ErrorMatcher(GENERIC_ERROR, null, ErrorSource.ERROR));
     matchers.add(new ErrorMatcher(GENERIC_WARNING, null, ErrorSource.WARNING));
+
+    this.updates = new ArrayBlockingQueue<>(1024);
 
     startSbt(ProjectViewer.getActiveProject(view));
   }
@@ -300,18 +311,21 @@ public class SbtConsole extends JPanel {
     }
     wrapper.setExecutable(true);
 
-    this.streams = Executors.newFixedThreadPool(2,
-      new ThreadFactory() {
-        private final AtomicInteger id = new AtomicInteger();
+    ThreadFactory factory = new ThreadFactory() {
+      private final AtomicInteger id = new AtomicInteger();
 
-        @Override
-        public Thread newThread(Runnable r) {
-          Thread t = new Thread(r);
-          t.setName(String.format("SBT-%s-%d", project.getName(),
-              id.incrementAndGet()));
-          return t;
-        }
-      });
+      @Override
+      public Thread newThread(Runnable r) {
+        Thread t = new Thread(r);
+        t.setName(String.format("SBT-%s-%d", project.getName(),
+            id.incrementAndGet()));
+        return t;
+      }
+    };
+
+    this.streams = Executors.newFixedThreadPool(3, factory);
+    this.drainer = Executors.newSingleThreadScheduledExecutor(factory);
+    drainer.submit(new ConsoleUpdater());
 
     String sbtCommand = SbtOptionsPane.getSbtCommand(project);
     String cmdLineArgs = SbtOptionsPane.get(project,
@@ -370,6 +384,12 @@ public class SbtConsole extends JPanel {
       }
       streams.shutdown();
       wrapper.delete();
+      drainer.shutdown();
+      try {
+        drainer.awaitTermination(1, TimeUnit.SECONDS);
+      } catch (InterruptedException ie) {
+        // Ignore.
+      }
     }
 
     clearBuffer();
@@ -396,42 +416,54 @@ public class SbtConsole extends JPanel {
   }
 
   private void appendToConsole(String line, Color color) {
+    appendToConsole(Arrays.asList(new ConsoleUpdate(line, color)));
+  }
+
+  private void appendToConsole(List<ConsoleUpdate> batch) {
     try {
-      if (bufferLineCount == maxScrollback) {
+      if (bufferLineCount + batch.size() > maxScrollback) {
+        int linesToDelete = bufferLineCount + batch.size() -
+          maxScrollback;
         Segment s = new Segment();
 
         int lastStart = 0;
-        int newline = -1;
+        int lines = 0;
+        int cropIndex = -1;
         while (true) {
-          document.getText(lastStart, Math.min(1024, document.getLength()), s);
+          int len = Math.min(1024, document.getLength());
+          document.getText(lastStart, len, s);
           for (int i = 0; i < s.count; i++) {
             if (s.array[s.offset + i] == '\n') {
-              newline = i;
+              lines++;
+              cropIndex = i;
               break;
             }
           }
-          if (newline != -1) {
+
+          if (lines == linesToDelete) {
             break;
           }
 
-          lastStart += 1024;
+          lastStart += len;
           if (lastStart > document.getLength()) {
-            // OOps.
             break;
           }
         }
-        if (newline != -1) {
-          document.remove(0, newline + 1);
+        if (cropIndex != -1) {
+          document.remove(0, cropIndex + 1);
         }
       } else {
-        bufferLineCount++;
+        bufferLineCount += batch.size();
       }
 
-      SimpleAttributeSet attrs = new SimpleAttributeSet();
-      if (color != null) {
-        attrs.addAttribute(StyleConstants.Foreground, color);
+      for (ConsoleUpdate update : batch) {
+        SimpleAttributeSet attrs = new SimpleAttributeSet();
+        if (update.color != null) {
+          attrs.addAttribute(StyleConstants.Foreground, update.color);
+        }
+        document.insertString(console.getText().length(),
+          update.content, attrs);
       }
-      document.insertString(console.getText().length(), line, attrs);
     } catch (BadLocationException ble) {
       ble.printStackTrace();
     }
@@ -673,6 +705,38 @@ public class SbtConsole extends JPanel {
 
   }
 
+  private class ConsoleUpdater implements Runnable {
+
+    @Override
+    public void run() {
+      try {
+        while (sbt != null) {
+          final List<ConsoleUpdate> batch = new ArrayList<>();
+          ConsoleUpdate next = updates.take();
+          if (next == POISON_PILL) {
+            break;
+          }
+
+          batch.add(next);
+
+          // Give some time to coalesce updates.
+          TimeUnit.MILLISECONDS.sleep(50);
+
+          updates.drainTo(batch);
+          SwingUtilities.invokeLater(new Runnable() {
+            @Override
+            public void run() {
+              appendToConsole(batch);
+            }
+          });
+        }
+      } catch (InterruptedException ie) {
+        // Nothing to do.
+      }
+    }
+
+  }
+
   private static class ErrorMatcher {
 
     final Pattern first;
@@ -687,7 +751,18 @@ public class SbtConsole extends JPanel {
 
   }
 
+  private static class ConsoleUpdate {
+
+      final String content;
+      final Color color;
+
+      ConsoleUpdate(String content, Color color) {
+          this.content = content;
+          this.color = color;
+      }
+
+  }
+
   // TODO: remove from edit bus.
 
 }
-
