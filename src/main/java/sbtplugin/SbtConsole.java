@@ -83,7 +83,7 @@ public class SbtConsole extends JPanel {
   private static final String SBT_DISABLED = "sbt.disabled.msg";
 
   private static final Pattern ERROR =
-      Pattern.compile("\\s*\\[error\\]\\s+(.+?):([0-9]+):\\s+(.*)[\r\n]+");
+      Pattern.compile("\\s*\\[error\\]\\s+(.+?):([0-9]+):(?:[0-9]+:)?\\s*(.*)[\r\n]+");
   private static final Pattern WARNING =
       Pattern.compile("\\s*\\[warn\\]\\s+(.+?):([0-9]+):\\s+(.*)[\r\n]+");
   private static final Pattern EXTRA =
