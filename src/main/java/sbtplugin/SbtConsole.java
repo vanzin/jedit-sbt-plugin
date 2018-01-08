@@ -19,7 +19,6 @@ import java.awt.ComponentOrientation;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.event.ActionEvent;
-import java.awt.event.ActionListener;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
@@ -141,7 +140,7 @@ public class SbtConsole extends JPanel {
 
     entry = new HistoryTextField(HISTORY_KEY);
     entry.setEnterAddsToHistory();
-    entry.addActionListener(new CommandRunner());
+    entry.addActionListener(this::runCommand);
 
     entryPanel.add(BorderLayout.CENTER, entry);
 
@@ -152,16 +151,13 @@ public class SbtConsole extends JPanel {
     clearButton.setIcon(new ImageIcon(
       getClass().getResource("/clear.png")));
     clearButton.setPreferredSize(new Dimension(24, 24));
-    clearButton.addActionListener(new ActionListener() {
-      @Override
-      public void actionPerformed(ActionEvent ae) {
+    clearButton.addActionListener(ae -> {
         if (sbt != null) {
           clearBuffer();
           if (handler.prompt != null) {
             appendToConsole(handler.prompt, plainColor);
           }
         }
-      }
     });
     buttons.add(clearButton);
 
@@ -169,15 +165,12 @@ public class SbtConsole extends JPanel {
     reloadButton.setIcon(new ImageIcon(
       getClass().getResource("/reload.png")));
     reloadButton.setPreferredSize(new Dimension(24, 24));
-    reloadButton.addActionListener(new ActionListener() {
-      @Override
-      public void actionPerformed(ActionEvent ae) {
+    reloadButton.addActionListener(ae -> {
         if (sbt != null) {
           VPTProject p = project;
           stopSbt();
           startSbt(p);
         }
-      }
     });
     buttons.add(reloadButton);
 
@@ -333,8 +326,6 @@ public class SbtConsole extends JPanel {
     };
 
     this.streams = Executors.newFixedThreadPool(3, factory);
-    this.drainer = Executors.newSingleThreadScheduledExecutor(factory);
-    drainer.submit(new ConsoleUpdater());
 
     String sbtCommand = SbtOptionsPane.getSbtCommand(project);
     String cmdLineArgs = SbtOptionsPane.get(project,
@@ -381,6 +372,8 @@ public class SbtConsole extends JPanel {
     this.sbtCommand = sbtCommand;
     this.sbtCmdLineArgs = cmdLineArgs;
     this.project = project;
+    this.drainer = Executors.newSingleThreadScheduledExecutor(factory);
+    drainer.submit(this::updateConsole);
     entryPanel.setEnabled(true);
   }
 
@@ -425,10 +418,10 @@ public class SbtConsole extends JPanel {
   }
 
   private void appendToConsole(String line, Color color) {
-    appendToConsole(Arrays.asList(new ConsoleUpdate(line, color)));
+    updates.add(new ConsoleUpdate(line, color));
   }
 
-  private void appendToConsole(List<ConsoleUpdate> batch) {
+  private void processUpdateBatch(List<ConsoleUpdate> batch) {
     try {
       if (bufferLineCount + batch.size() > maxScrollback) {
         int linesToDelete = bufferLineCount + batch.size() -
@@ -532,7 +525,7 @@ public class SbtConsole extends JPanel {
 
       String currTarget = target.toString();
       if (currTarget.equals("> ") || currTarget.endsWith("? ")) {
-        append(currTarget, null);
+        appendToConsole(currTarget, null);
         if (!commandQueue.isEmpty()) {
           nextCommand();
         } else {
@@ -658,7 +651,7 @@ public class SbtConsole extends JPanel {
         }
       }
 
-      append(line, highlight);
+      appendToConsole(line, highlight);
     }
 
     private void unregisterSource() {
@@ -689,61 +682,37 @@ public class SbtConsole extends JPanel {
       return false;
     }
 
-    private void append(final String line, final Color color) {
-      SwingUtilities.invokeLater(new Runnable() {
-        @Override
-        public void run() {
-          appendToConsole(line, color);
-        }
-      });
-    }
-
   }
 
-  private class CommandRunner implements ActionListener {
-
-    @Override
-    public void actionPerformed(ActionEvent ae) {
-      String command = entry.getText().trim();
-      if ("exit".equals(command)) {
-        return;
-      }
-      handler.runCommand(command);
-      entry.setText("");
+  private void runCommand(ActionEvent ae) {
+    String command = entry.getText().trim();
+    if ("exit".equals(command)) {
+    return;
     }
-
+    handler.runCommand(command);
+    entry.setText("");
   }
 
-  private class ConsoleUpdater implements Runnable {
-
-    @Override
-    public void run() {
-      try {
-        while (sbt != null) {
-          final List<ConsoleUpdate> batch = new ArrayList<>();
-          ConsoleUpdate next = updates.take();
-          if (next == POISON_PILL) {
-            break;
-          }
-
-          batch.add(next);
-
-          // Give some time to coalesce updates.
-          TimeUnit.MILLISECONDS.sleep(50);
-
-          updates.drainTo(batch);
-          SwingUtilities.invokeLater(new Runnable() {
-            @Override
-            public void run() {
-              appendToConsole(batch);
-            }
-          });
+  private void updateConsole() {
+    try {
+      while (sbt != null) {
+        final List<ConsoleUpdate> batch = new ArrayList<>();
+        ConsoleUpdate next = updates.take();
+        if (next == POISON_PILL) {
+          break;
         }
-      } catch (InterruptedException ie) {
-        // Nothing to do.
-      }
-    }
 
+        batch.add(next);
+
+        // Give some time to coalesce updates.
+        TimeUnit.MILLISECONDS.sleep(50);
+
+        updates.drainTo(batch);
+        SwingUtilities.invokeLater(() -> processUpdateBatch(batch));
+      }
+    } catch (InterruptedException ie) {
+      // Nothing to do.
+    }
   }
 
   private static class ErrorMatcher {
@@ -771,7 +740,5 @@ public class SbtConsole extends JPanel {
       }
 
   }
-
-  // TODO: remove from edit bus.
 
 }

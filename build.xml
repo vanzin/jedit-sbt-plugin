@@ -7,8 +7,8 @@
   <property name="plugin.dependencies"
       value="CommonControls,Console,ErrorList,ProjectViewer" />
   <property name="jedit.plugins.dir" value="${install.dir}" />
-  <property name="compiler.source" value="1.7" />
-  <property name="compiler.target" value="1.7" />
+  <property name="compiler.source" value="1.8" />
+  <property name="compiler.target" value="1.8" />
 
   <import file="${build.support}/plugin-build.xml" />
 
