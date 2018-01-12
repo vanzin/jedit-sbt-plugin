@@ -418,7 +418,16 @@ public class SbtConsole extends JPanel {
   }
 
   private void appendToConsole(String line, Color color) {
-    updates.add(new ConsoleUpdate(line, color));
+    ConsoleUpdate update = new ConsoleUpdate(line, color);
+    if (SwingUtilities.isEventDispatchThread()) {
+      processUpdateBatch(Arrays.asList(update));
+    } else {
+      try {
+        updates.put(update);
+      } catch (InterruptedException ie) {
+        // ignore
+      }
+    }
   }
 
   private void processUpdateBatch(List<ConsoleUpdate> batch) {
