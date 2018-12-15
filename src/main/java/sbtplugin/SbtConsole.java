@@ -51,7 +51,6 @@ import javax.swing.JToggleButton;
 import javax.swing.SwingUtilities;
 import javax.swing.text.BadLocationException;
 import javax.swing.text.DefaultStyledDocument;
-import javax.swing.text.Segment;
 import javax.swing.text.SimpleAttributeSet;
 import javax.swing.text.StyleConstants;
 
@@ -124,6 +123,7 @@ public class SbtConsole extends JPanel {
   private OutputStream stdin;
   private int bufferLineCount;
   private int maxScrollback;
+  private int[] lineStartOffsets;
   private ExecutorService streams;
   private ExecutorService drainer;
   private File wrapper;
@@ -217,6 +217,11 @@ public class SbtConsole extends JPanel {
     warningColor = jEdit.getColorProperty("console.warningColor");
     errorColor = jEdit.getColorProperty("console.errorColor");
     maxScrollback = SbtGlobalOptions.getMaxScrollback();
+    if (lineStartOffsets == null) {
+      lineStartOffsets = new int[maxScrollback];
+    } else {
+      lineStartOffsets = Arrays.copyOf(lineStartOffsets, maxScrollback);
+    }
   }
 
   @EBHandler
@@ -432,39 +437,20 @@ public class SbtConsole extends JPanel {
 
   private void processUpdateBatch(List<ConsoleUpdate> batch) {
     try {
-      if (bufferLineCount + batch.size() > maxScrollback) {
-        int linesToDelete = bufferLineCount + batch.size() -
-          maxScrollback;
-        Segment s = new Segment();
-
-        int lastStart = 0;
-        int lines = 0;
-        int cropIndex = -1;
-        while (true) {
-          int len = Math.min(1024, document.getLength());
-          document.getText(lastStart, len, s);
-          for (int i = 0; i < s.count; i++) {
-            if (s.array[s.offset + i] == '\n') {
-              lines++;
-              cropIndex = i;
-              break;
-            }
-          }
-
-          if (lines == linesToDelete) {
-            break;
-          }
-
-          lastStart += len;
-          if (lastStart > document.getLength()) {
-            break;
-          }
+      int linesToDelete = (bufferLineCount + batch.size() - maxScrollback);
+      if (linesToDelete > 0) {
+        int deleteTo = 0;
+        for (int i = 0; i < linesToDelete; i++) {
+          deleteTo += lineStartOffsets[i];
         }
-        if (cropIndex != -1) {
-          document.remove(0, cropIndex + 1);
+
+        if (deleteTo > 0) {
+          document.remove(0, deleteTo);
         }
-      } else {
-        bufferLineCount += batch.size();
+        for (int i = 0; i < bufferLineCount - linesToDelete; i++) {
+          lineStartOffsets[i] = lineStartOffsets[linesToDelete + i];
+        }
+        bufferLineCount -= linesToDelete;
       }
 
       for (ConsoleUpdate update : batch) {
@@ -474,6 +460,7 @@ public class SbtConsole extends JPanel {
         }
         document.insertString(console.getText().length(),
           update.content, attrs);
+        lineStartOffsets[bufferLineCount++] = update.content.length();
       }
     } catch (BadLocationException ble) {
       ble.printStackTrace();
